@@ -1,10 +1,4 @@
-#include <algorithm>
-#include <limits>
-#include <map>
-#include <queue>
-#include <utility>
-#include <vector>
-
+#include <bits/stdc++.h>
 using adjacencyList = std::vector<std::vector<int>>;
 using adjacencyMatrix = std::vector<std::vector<long long>>;
 
@@ -49,6 +43,45 @@ preprocess(adjacencyMatrix &graph) {
   return {adjustedGraph, adjusted};
 }
 
+/**
+ * @brief Changes the edgeFlows matrix to correspond to the original graph
+ *
+ * @param edgeFlows the edge flows. All the added vertices should be at the end.
+ * @param adjustments the adjustments.
+ * @return adjacencyMatrix the edgeflows for the original graph. mat[from][to] =
+ * flow or -1 if no edge exists.
+ */
+adjacencyMatrix postprocess(adjacencyMatrix &edgeFlows,
+                            std::map<int, int> &adjustments) {
+  int newSize = edgeFlows.size() - adjustments.size();
+  adjacencyMatrix result(newSize, std::vector<long long>(newSize, -1));
+
+  for (int u = 0; u < edgeFlows.size(); ++u) {
+    for (int v = 0; v < edgeFlows.size(); ++v) {
+      if (edgeFlows[u][v] != -1) {
+        // there's an actual flow
+        // see what it corresponds to
+        if (adjustments.count(u) || adjustments.count(v)) {
+          // at least one is an added vertex
+          int actualU = u;
+          if (adjustments.count(u)) {
+            actualU = adjustments[u];
+          }
+          int actualV = v;
+          if (adjustments.count(v)) {
+            actualV = adjustments[v];
+          }
+          result[actualU][actualV] = edgeFlows[u][v];
+        } else {
+          // none of them is an added vertex
+          result[u][v] = edgeFlows[u][v];
+        }
+      }
+    }
+  }
+  return result;
+}
+
 std::vector<std::pair<int, int>>
 edmondKarpGetPath(adjacencyList &residualGraph,
                   adjacencyMatrix &residualCapacity, int source, int sink) {
@@ -89,12 +122,12 @@ edmondKarpGetPath(adjacencyList &residualGraph,
 /**
  * @brief Calculates maximum flow for the graph
  *
- * @param graph a directed graph in adjacency list format, where
+ * @param graph a directed graph in adjacency matrix format, where
  * each entry is {to, capacity}. If there is an edge from a to b,
  * there SHOULD NOT be an edge from b to a.
  * @param source the number for the source vertex
  * @param sink the number for the sink vertex
- * @return std::pair<long long, std::map<std::pair<int, int>, long long>> a pair
+ * @return std::pair<long long, adjacencyMatrix> a pair
  * of (max flow, per edge flow). per edge flow is a matrix of [from][to] = flow
  * or -1
  */
@@ -156,25 +189,56 @@ std::pair<long long, adjacencyMatrix> edmondKarp(adjacencyMatrix &graph,
   return {flow, edgeFlows};
 }
 
-#include <iostream>
 using namespace std;
+using ll = long long;
 
 int main() {
   int n, m;
   cin >> n >> m;
-  // because sometimes we get duplicates that need to be added
-  adjacencyMatrix graph(n, vector<long long>(n, 0));
-  for (int i = 0; i < m; ++i) {
-    long long from, to, capacity;
-    cin >> from >> to >> capacity;
-    // 0-index them
-    from--;
-    to--;
-    graph[from][to] += capacity;
-  }
 
-  // now just find max flow from 0 to n-1
-  auto [adjustedGraph, adjustedEdges] = preprocess(graph);
-  auto [flow, flows] = edmondKarp(adjustedGraph, 0, n - 1);
+  // just find how much flow can go from 1 to n
+  // and then find the specific paths
+  // each edge has capacity 1
+  adjacencyMatrix mat(n, vector<ll>(n));
+  for (int i = 0; i < m; ++i) {
+    int a, b;
+    cin >> a >> b;
+    mat[--a][--b] = 1;
+  }
+  auto [processedMat, adjustments] = preprocess(mat);
+  auto [flow, flows] = edmondKarp(processedMat, 0, n - 1);
+  auto finalMat = postprocess(flows, adjustments);
   cout << flow << endl;
+  // then find each of those paths
+  for (; flow > 0; --flow) {
+    // just do a bfs from 0, storing parents
+    vector<int> pi(n, -1);
+    queue<int> q;
+    q.push(0);
+    while (pi[n - 1] == -1) {
+      int node = q.front();
+      q.pop();
+      for (int conn = 0; conn < n; ++conn) {
+        if (finalMat[node][conn] > 0 && pi[conn] == -1) {
+          pi[conn] = node;
+          q.push(conn);
+        }
+      }
+    }
+    // now reconstruct from the end
+    vector<int> path = {n - 1};
+    while (path.back() != 0) {
+      path.push_back(pi[path.back()]);
+    }
+    // now output
+    cout << path.size() << endl;
+    for (int i = path.size() - 1; i >= 0; --i) {
+      cout << path[i] + 1 << ' ';
+      // and clear these edges
+      if (i > 0) {
+        finalMat[path[i]][path[i - 1]] = 0;
+      }
+    }
+    cout << endl;
+  }
 }
