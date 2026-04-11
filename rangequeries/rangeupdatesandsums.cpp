@@ -1,5 +1,4 @@
 #include <bits/stdc++.h>
-#include <sys/types.h>
 using namespace std;
 using ll = long long;
 
@@ -10,7 +9,7 @@ struct Info {
   optional<ll> setTo;
   Info(ll v) : inc(0), sum(v), count(1), setTo(nullopt) {}
   Info(ll sum, ll count) : inc(0), sum(sum), count(count), setTo(nullopt) {}
-  ll total() {
+  ll total() const {
     if (setTo) {
       return (*setTo + inc) * count;
     }
@@ -43,25 +42,8 @@ struct Segtree {
       levels.push_back(nextLevel);
     }
   }
-  ll query(int l, int r) { return queryHelper(l, r, levels.size() - 1, 0); }
   pair<int, int> range(int level, size_t levelIdx) {
     return {(1 << level) * levelIdx, min((1 << level) * (levelIdx + 1), n) - 1};
-  }
-
-  ll queryHelper(int l, int r, int level, size_t levelIdx) {
-    if (levelIdx >= levels[level].size()) {
-      return 0;
-    }
-    auto [myL, myR] = range(level, levelIdx);
-    if (l <= myL && myR <= r) {
-      return levels[level][levelIdx].total();
-    } else if (myR < l || r < myL) {
-      return 0;
-    } else {
-      pushdown(level, levelIdx);
-      return queryHelper(l, r, level - 1, levelIdx * 2) +
-             queryHelper(l, r, level - 1, levelIdx * 2 + 1);
-    }
   }
   void pushdown(int level, size_t levelIdx) {
     // pass down existing set first
@@ -80,40 +62,51 @@ struct Segtree {
     levels[level][levelIdx].sum +=
         queryHelper(0, n, level - 1, levelIdx * 2 + 1);
   }
-  void set(int l, int r, ll amt) { setHelper(l, r, amt, levels.size() - 1, 0); }
-  void inc(int l, int r, ll amt) { incHelper(l, r, amt, levels.size() - 1, 0); }
-  void setHelper(int l, int r, ll amt, int level, size_t levelIdx) {
+
+  template <typename R, typename F>
+  R opHelper(int l, int r, int level, size_t levelIdx, F &&f, R defaultVal) {
     if (levelIdx >= levels[level].size()) {
-      return;
+      return defaultVal;
     }
     auto [myL, myR] = range(level, levelIdx);
     if (l <= myL && myR <= r) {
-      levels[level][levelIdx].set(amt);
-    } else if (!(myR < l || r < myL)) {
+      return f(level, levelIdx);
+    } else if (myR < l || r < myL) {
+      return defaultVal;
+    } else {
       pushdown(level, levelIdx);
-      // then have children get set
-      setHelper(l, r, amt, level - 1, levelIdx * 2);
-      setHelper(l, r, amt, level - 1, levelIdx * 2 + 1);
-      // and update sum
+      ll ret = opHelper(l, r, level - 1, levelIdx * 2, f, defaultVal);
+      ret += opHelper(l, r, level - 1, levelIdx * 2 + 1, f, defaultVal);
       pushdown(level, levelIdx);
+      return ret;
     }
+  }
+  ll queryHelper(int l, int r, int level, size_t levelIdx) {
+    return opHelper(
+        l, r, level, levelIdx,
+        [&](int i, size_t j) { return levels[i][j].total(); }, 0LL);
+  }
+  void setHelper(int l, int r, ll amt, int level, size_t levelIdx) {
+    opHelper(
+        l, r, level, levelIdx,
+        [&](int i, size_t j) {
+          levels[i][j].set(amt);
+          return 0;
+        },
+        0);
   }
   void incHelper(int l, int r, ll amt, int level, size_t levelIdx) {
-    if (levelIdx >= levels[level].size()) {
-      return;
-    }
-    auto [myL, myR] = range(level, levelIdx);
-    if (l <= myL && myR <= r) {
-      levels[level][levelIdx].inc += amt;
-    } else if (!(myR < l || r < myL)) {
-      pushdown(level, levelIdx);
-      // inc children
-      incHelper(l, r, amt, level - 1, levelIdx * 2);
-      incHelper(l, r, amt, level - 1, levelIdx * 2 + 1);
-      // update sum
-      pushdown(level, levelIdx);
-    }
+    opHelper(
+        l, r, level, levelIdx,
+        [&](int i, size_t j) {
+          levels[i][j].inc += amt;
+          return 0;
+        },
+        0);
   }
+  ll query(int l, int r) { return queryHelper(l, r, levels.size() - 1, 0); }
+  void set(int l, int r, ll amt) { setHelper(l, r, amt, levels.size() - 1, 0); }
+  void inc(int l, int r, ll amt) { incHelper(l, r, amt, levels.size() - 1, 0); }
 };
 
 int main() {
