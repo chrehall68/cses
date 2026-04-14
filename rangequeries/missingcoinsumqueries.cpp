@@ -24,7 +24,8 @@ struct PersistentSegtree {
           r(r), p(l->p) {
       if (r != nullptr) {
         sum += r->sum;
-        ma = r->ma;
+        ma = max(ma, r->ma);
+        mi = min(mi, r->mi);
         myR = r->myR;
       }
       p->nodes.push_back(this);
@@ -44,21 +45,6 @@ struct PersistentSegtree {
         } else {
           return new Node(l->update(idx, v), r);
         }
-      }
-    }
-
-    // sums everything strictly lt r
-    ll query(int r) {
-      if (myR < r) {
-        return sum;
-      } else if (myL >= r) {
-        return 0;
-      } else {
-        ll res = l->query(r);
-        if (this->r != nullptr) {
-          res += this->r->query(r);
-        }
-        return res;
       }
     }
   };
@@ -128,12 +114,19 @@ int main() {
   // because then the amount of numbers <= X is just sum(...upper bound of X)
   // and we can get that sum in lgN time, and get the upper bound of X in lgN
   // time and we would increase our mex lgMEX times
+  // maybe if we had a persistent array on the sum
+  // and the min in the intervals intervals [1], [2,3], [4,5,6,7], [8..15], ...
+  // then we would just need to go through each of those intervals and total
+  // up their sum so long as their minimum element <= curSum + 1
+  // but that means we need the minimum element, which isn't easily reversible
+  // maybe we do use the segtree built on the sorted things
+  // goal = do that same logic, but on the persistent segtree
   ios_base::sync_with_stdio(false);
   cin.tie(nullptr);
   cout.tie(nullptr);
   int n, q;
   cin >> n >> q;
-  vector<ll> orig(n);
+  vector<ll> orig(n), sted(n);
   vector<pair<ll, int>> nums(n);
   vector<int> toSortedIdx(n);
   for (int i = 0; i < n; ++i) {
@@ -141,35 +134,44 @@ int main() {
     cin >> num;
     nums[i] = {num, i};
     orig[i] = num;
+    sted[i] = num;
   }
   sort(nums.begin(), nums.end());
+  sort(sted.begin(), sted.end());
   for (int sIdx = 0; sIdx < n; ++sIdx) {
     toSortedIdx[nums[sIdx].second] = sIdx;
   }
   // roots[i] = root after adding first i elements
   PersistentSegtree s;
   vector<PersistentSegtree::Node *> roots(n + 1);
-  roots[0] = s.build(orig);
+  roots[0] = s.build(sted);
   for (int i = 0; i < n; ++i) {
     roots[i + 1] = roots[i]->update(toSortedIdx[i], orig[i]);
   }
   // then now process queries
+  auto dfs = [](auto &&self, PersistentSegtree::Node *lNode,
+                PersistentSegtree::Node *rNode, ll curMex) {
+    assert(lNode->mi == rNode->mi && lNode->ma == rNode->ma);
+    if (lNode->mi > curMex + 1) {
+      return curMex;
+    } else if (lNode->ma <= curMex + 1) {
+      return curMex + rNode->sum - lNode->sum;
+    } else {
+      // split to children
+      ll nextMex = self(self, lNode->l, rNode->l, curMex);
+      if (lNode->r != nullptr) {
+        nextMex = self(self, lNode->r, rNode->r, nextMex);
+      }
+      return nextMex;
+    }
+  };
   for (int i = 0; i < q; ++i) {
     int l, r;
     cin >> l >> r;
     PersistentSegtree::Node *lNode = roots[--l], *rNode = roots[r];
     // then the sums of the interval are encoded as difference in sums between
     // rNode and lNode
-    ll mex = 0;
-    int idx =
-        upper_bound(nums.begin(), nums.end(), pair{mex + 1, n}) - nums.begin();
-    ll reachable = rNode->query(idx) - lNode->query(idx);
-    while (reachable != mex) {
-      mex = reachable;
-      idx = upper_bound(nums.begin(), nums.end(), pair{mex + 1, n}) -
-            nums.begin();
-      reachable = rNode->query(idx) - lNode->query(idx);
-    }
+    ll mex = dfs(dfs, lNode, rNode, 0);
     cout << mex + 1 << '\n';
   }
 }
