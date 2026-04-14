@@ -1,64 +1,55 @@
+#pragma GCC optimize("O3", "unroll-loops")
 #include <bits/stdc++.h>
 using namespace std;
 using ll = long long;
-struct Info {
-  vector<ll> nums;
-  vector<ll> psums;
-  Info(ll num) {
-    nums.push_back(num);
-    psums.push_back(0);
-    psums.push_back(num);
-  }
-  Info(Info &a, Info &b) {
-    nums.resize(a.nums.size() + b.nums.size());
-    merge(a.nums.begin(), a.nums.end(), b.nums.begin(), b.nums.end(),
-          nums.begin());
-    psums.resize(nums.size() + 1);
-    for (size_t i = 0; i < nums.size(); ++i) {
-      psums[i + 1] = psums[i] + nums[i];
-    }
-  }
-};
 struct Segtree {
-  vector<vector<Info>> levels;
+  vector<ll> stree;
   size_t n;
-  Segtree(vector<ll> init) : n(init.size()) {
-    levels.push_back({});
-    for (size_t i = 0; i < init.size(); i++) {
-      levels.back().push_back(Info(init[i]));
+  size_t levels;
+  Segtree(size_t n) {
+    // find closest power of 2
+    size_t pow2 = 1;
+    levels = 1;
+    while (pow2 <= n) {
+      pow2 *= 2;
+      ++levels;
     }
-    while (levels.back().size() > 1) {
-      vector<Info> &b = levels.back();
-      vector<Info> nextLevel;
-      for (size_t i = 0; i < b.size(); i += 2) {
-        if (i + 1 < b.size()) {
-          nextLevel.push_back(Info(b[i], b[i + 1]));
-        } else {
-          nextLevel.push_back(b[i]);
-        }
-      }
-      levels.push_back(std::move(nextLevel));
-    }
+    this->n = pow2;
+    // stree[0..pow2] = level0
+    // stree[pow2..pow2 + pow2/2] = level1
+    // stree[pow2 + pow2/2 .. pow2 + pow2/2 + pow2/4] = level2
+    // ...
+    // suppose pow2 = 8
+    // [0..8] = level0
+    // [8..12] = level1
+    // [12..14] = level2
+    // [14..15] = level3
+    // so root would be at index 14
+    // so we'll resize it so that root is the last element
+    stree.resize(pow2 * 2 - 1);
   }
-  vector<Info *> query(int l, int r) {
-    vector<Info *> output;
-    queryHelper(l, r, levels.size() - 1, 0, output);
-    return output;
+  ll query(int l, int r) {
+    return queryHelper(l, r, levels - 1, stree.size() - 1, 0);
   }
   pair<int, int> range(int level, size_t levelIdx) {
-    return {(1 << level) * levelIdx, min((1 << level) * (levelIdx + 1), n) - 1};
+    return {(1 << level) * levelIdx, (1 << level) * (levelIdx + 1) - 1};
   }
-  void queryHelper(int l, int r, int level, size_t levelIdx,
-                   vector<Info *> &output) {
-    if (levelIdx >= levels[level].size()) {
-      return;
-    }
+  ll queryHelper(int l, int r, int level, size_t levelStart, size_t levelIdx) {
     auto [myL, myR] = range(level, levelIdx);
     if (l <= myL && myR <= r) {
-      output.push_back(&levels[level][levelIdx]);
-    } else if (!(myR < l || r < myL)) {
-      queryHelper(l, r, level - 1, levelIdx * 2, output);
-      queryHelper(l, r, level - 1, levelIdx * 2 + 1, output);
+      return stree[levelStart + levelIdx];
+    } else if (myR < l || r < myL) {
+      return 0;
+    } else {
+      size_t nextLevelStart = levelStart - (1 << (levels - level));
+      return queryHelper(l, r, level - 1, nextLevelStart, levelIdx * 2) +
+             queryHelper(l, r, level - 1, nextLevelStart, levelIdx * 2 + 1);
+    }
+  }
+  void inc(int idx, ll val) {
+    for (size_t level = 0, levelStart = 0; level < levels;
+         levelStart += 1 << (levels - ++level), idx /= 2) {
+      stree[levelStart + idx] += val;
     }
   }
 };
@@ -78,41 +69,77 @@ int main() {
   // but then we want to be able to get the numbers in order
   // so maybe we have merge tree
   // and then just handle it increasing (it can only increase lg(MEX) times)
+  // since each time we need to check if it increases, the cur mex
+  // either stays the same (it's finished), or it at least doubles
   // and each time we just need to calculate the sum of everything <= MEX
   // the problem is, that gives us O(NlgN + Q (lg**2(N)) lg MEX)
   // which is O(NlgN + Q lg**3 (N))
-  // currently TLE's
+  // that will TLE, though since Q lg**3 (N) is a lot
+  // to improve that, instead of handling online and then bsearching over
+  // lgN intervals lgMEX times, maybe we can handle the queries offline
+  // we can add things in sorted order
+  // and then do their queries when the next element that we would've
+  // enabled is greater than next mex
+  // since then we need to do O(lgMEX) segtree queries for each query
+  // and we need to keep the queries in order
+  // and our segtree just needs the sums now, making queries faster
+  // so we get O(NlgN + Q lgQ lgMEX + Q lgMEX lgN)
   ios_base::sync_with_stdio(false);
   cin.tie(nullptr);
   cout.tie(nullptr);
   int n, q;
   cin >> n >> q;
-  vector<ll> nums(n);
+  vector<pair<ll, int>> nums(n + 1);
+  Segtree s(n + 1);
   for (int i = 0; i < n; ++i) {
-    cin >> nums[i];
+    ll num;
+    cin >> num;
+    nums[i] = {num, i};
   }
-  Segtree s(nums);
-  // sum of numbers <= le
-  auto getSum = [&](vector<Info *> &v, ll le) {
-    ll res = 0;
-    for (Info *inf : v) {
-      auto it = upper_bound(inf->nums.begin(), inf->nums.end(), le);
-      res += inf->psums[it - inf->nums.begin()];
-    }
-    return res;
-  };
+  nums[n] = {numeric_limits<ll>::max(), n};
+  sort(nums.begin(), nums.end());
+  // want to be able to access the thing with the minimum mex
+  priority_queue<tuple<ll, int, int, int>, vector<tuple<ll, int, int, int>>,
+                 greater<>>
+      queries;
   for (int i = 0; i < q; ++i) {
     int l, r;
     cin >> l >> r;
-    vector<Info *> descriptor = s.query(--l, --r);
-    ll mex = 0;
-    ll prevSum = 0;
-    ll nextSum = getSum(descriptor, mex + 1);
-    while (nextSum != prevSum) {
-      mex += nextSum - prevSum;
-      prevSum = nextSum;
-      nextSum = getSum(descriptor, mex + 1);
+    queries.push({0, --l, --r, i});
+  }
+  // handle offline
+  vector<ll> res(q);
+  size_t l = 0;
+  while (l < nums.size()) {
+    // go to end
+    ll num = nums[l].first;
+    size_t r = l + 1;
+    while (r < nums.size() && nums[r].first == nums[l].first) {
+      r++;
     }
-    cout << mex + 1 << '\n';
+
+    // some things might not be able to use this
+    while (!queries.empty() && get<0>(queries.top()) + 1 < num) {
+      auto [prevMex, l, r, resIdx] = queries.top();
+      queries.pop();
+
+      ll curMex = s.query(l, r);
+      if (curMex + 1 < num) {
+        // we are finished
+        res[resIdx] = curMex + 1;
+      } else {
+        // still alive
+        queries.push({curMex, l, r, resIdx});
+      }
+    }
+
+    // enable new things
+    while (l < r) {
+      s.inc(nums[l++].second, num);
+    }
+  }
+  // then output
+  for (ll num : res) {
+    cout << num << '\n';
   }
 }
