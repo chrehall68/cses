@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <bits/stdc++.h>
 using namespace std;
 using ll = long long;
@@ -11,12 +10,9 @@ struct PersistentSegtree {
     Node *l, *r;
     PersistentSegtree *p;
 
-    Node(ll v, int idx, PersistentSegtree *p, bool enabled = true)
-        : sum(v), mi(v), ma(v), myL(idx), myR(idx), l(nullptr), r(nullptr),
+    Node(ll s, ll v, int idx, PersistentSegtree *p)
+        : sum(s), mi(v), ma(v), myL(idx), myR(idx), l(nullptr), r(nullptr),
           p(p) {
-      if (!enabled) {
-        sum = 0;
-      }
       p->nodes.push_back(this);
     }
     Node(Node *l, Node *r)
@@ -36,14 +32,14 @@ struct PersistentSegtree {
       r = nullptr;
     }
 
-    Node *update(int idx, ll v) {
+    Node *inc(int idx, ll v) {
       if (myL == myR && myL == idx) {
-        return new Node(v, idx, p);
+        return new Node(sum + v, v, idx, p);
       } else {
         if (l->myR < idx) {
-          return new Node(l, r->update(idx, v));
+          return new Node(l, r->inc(idx, v));
         } else {
-          return new Node(l->update(idx, v), r);
+          return new Node(l->inc(idx, v), r);
         }
       }
     }
@@ -60,7 +56,7 @@ struct PersistentSegtree {
   Node *build(vector<ll> init) {
     vector<Node *> prev;
     for (size_t i = 0; i < init.size(); ++i) {
-      prev.push_back(new Node(init[i], i, this, false));
+      prev.push_back(new Node(0, init[i], i, this));
     }
     while (prev.size() > 1) {
       vector<Node *> cur;
@@ -126,27 +122,33 @@ int main() {
   cout.tie(nullptr);
   int n, q;
   cin >> n >> q;
-  vector<ll> orig(n), sted(n);
-  vector<pair<ll, int>> nums(n);
-  vector<int> toSortedIdx(n);
+  // don't store multiple nodes for duplicates of the number
+  vector<ll> orig(n), sortedDistinct;
+  vector<int> toSortedIdx(n), indices(n);
+  iota(indices.begin(), indices.end(), 0);
   for (int i = 0; i < n; ++i) {
     ll num;
     cin >> num;
-    nums[i] = {num, i};
     orig[i] = num;
-    sted[i] = num;
   }
-  sort(nums.begin(), nums.end());
-  sort(sted.begin(), sted.end());
-  for (int sIdx = 0; sIdx < n; ++sIdx) {
-    toSortedIdx[nums[sIdx].second] = sIdx;
+  sort(indices.begin(), indices.end(),
+       [&](int a, int b) { return orig[a] < orig[b]; });
+  for (int l = 0, sIdx = 0; l < n; sIdx++) {
+    int r = l + 1;
+    while (r < n && orig[indices[l]] == orig[indices[r]]) {
+      r++;
+    }
+    sortedDistinct.push_back(orig[indices[l]]);
+    while (l < r) {
+      toSortedIdx[indices[l++]] = sIdx;
+    }
   }
   // roots[i] = root after adding first i elements
   PersistentSegtree s;
   vector<PersistentSegtree::Node *> roots(n + 1);
-  roots[0] = s.build(sted);
+  roots[0] = s.build(sortedDistinct);
   for (int i = 0; i < n; ++i) {
-    roots[i + 1] = roots[i]->update(toSortedIdx[i], orig[i]);
+    roots[i + 1] = roots[i]->inc(toSortedIdx[i], orig[i]);
   }
   // then now process queries
   auto dfs = [](auto &&self, PersistentSegtree::Node *lNode,
@@ -155,6 +157,8 @@ int main() {
     if (lNode->mi > curMex + 1) {
       return curMex;
     } else if (lNode->ma <= curMex + 1) {
+      // then the sums of the interval are encoded as difference in sums between
+      // rNode and lNode
       return curMex + rNode->sum - lNode->sum;
     } else {
       // split to children
@@ -169,8 +173,6 @@ int main() {
     int l, r;
     cin >> l >> r;
     PersistentSegtree::Node *lNode = roots[--l], *rNode = roots[r];
-    // then the sums of the interval are encoded as difference in sums between
-    // rNode and lNode
     ll mex = dfs(dfs, lNode, rNode, 0);
     cout << mex + 1 << '\n';
   }
