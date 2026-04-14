@@ -1,56 +1,93 @@
-#pragma GCC optimize("O3", "unroll-loops")
+#include <algorithm>
 #include <bits/stdc++.h>
 using namespace std;
 using ll = long long;
-struct Segtree {
-  vector<ll> stree;
-  size_t n;
-  size_t levels;
-  Segtree(size_t n) {
-    // find closest power of 2
-    size_t pow2 = 1;
-    levels = 1;
-    while (pow2 <= n) {
-      pow2 *= 2;
-      ++levels;
+struct PersistentSegtree {
+  struct Node;
+  vector<Node *> nodes;
+  struct Node {
+    ll sum, mi, ma;
+    int myL, myR;
+    Node *l, *r;
+    PersistentSegtree *p;
+
+    Node(ll v, int idx, PersistentSegtree *p, bool enabled = true)
+        : sum(v), mi(v), ma(v), myL(idx), myR(idx), l(nullptr), r(nullptr),
+          p(p) {
+      if (!enabled) {
+        sum = 0;
+      }
+      p->nodes.push_back(this);
     }
-    this->n = pow2;
-    // stree[0..pow2] = level0
-    // stree[pow2..pow2 + pow2/2] = level1
-    // stree[pow2 + pow2/2 .. pow2 + pow2/2 + pow2/4] = level2
-    // ...
-    // suppose pow2 = 8
-    // [0..8] = level0
-    // [8..12] = level1
-    // [12..14] = level2
-    // [14..15] = level3
-    // so root would be at index 14
-    // so we'll resize it so that root is the last element
-    stree.resize(pow2 * 2 - 1);
-  }
-  ll query(int l, int r) {
-    return queryHelper(l, r, levels - 1, stree.size() - 1, 0);
-  }
-  pair<int, int> range(int level, size_t levelIdx) {
-    return {(1 << level) * levelIdx, (1 << level) * (levelIdx + 1) - 1};
-  }
-  ll queryHelper(int l, int r, int level, size_t levelStart, size_t levelIdx) {
-    auto [myL, myR] = range(level, levelIdx);
-    if (l <= myL && myR <= r) {
-      return stree[levelStart + levelIdx];
-    } else if (myR < l || r < myL) {
-      return 0;
-    } else {
-      size_t nextLevelStart = levelStart - (1 << (levels - level));
-      return queryHelper(l, r, level - 1, nextLevelStart, levelIdx * 2) +
-             queryHelper(l, r, level - 1, nextLevelStart, levelIdx * 2 + 1);
+    Node(Node *l, Node *r)
+        : sum(l->sum), mi(l->mi), ma(l->ma), myL(l->myL), myR(l->myR), l(l),
+          r(r), p(l->p) {
+      if (r != nullptr) {
+        sum += r->sum;
+        ma = r->ma;
+        myR = r->myR;
+      }
+      p->nodes.push_back(this);
+    }
+    ~Node() {
+      p = nullptr;
+      l = nullptr;
+      r = nullptr;
+    }
+
+    Node *update(int idx, ll v) {
+      if (myL == myR && myL == idx) {
+        return new Node(v, idx, p);
+      } else {
+        if (l->myR < idx) {
+          return new Node(l, r->update(idx, v));
+        } else {
+          return new Node(l->update(idx, v), r);
+        }
+      }
+    }
+
+    // sums everything strictly lt r
+    ll query(int r) {
+      if (myR < r) {
+        return sum;
+      } else if (myL >= r) {
+        return 0;
+      } else {
+        ll res = l->query(r);
+        if (this->r != nullptr) {
+          res += this->r->query(r);
+        }
+        return res;
+      }
+    }
+  };
+
+  PersistentSegtree() = default;
+  ~PersistentSegtree() {
+    for (size_t i = 0; i < nodes.size(); ++i) {
+      delete nodes[i];
+      nodes[i] = nullptr;
     }
   }
-  void inc(int idx, ll val) {
-    for (size_t level = 0, levelStart = 0; level < levels;
-         levelStart += 1 << (levels - ++level), idx /= 2) {
-      stree[levelStart + idx] += val;
+
+  Node *build(vector<ll> init) {
+    vector<Node *> prev;
+    for (size_t i = 0; i < init.size(); ++i) {
+      prev.push_back(new Node(init[i], i, this, false));
     }
+    while (prev.size() > 1) {
+      vector<Node *> cur;
+      for (size_t i = 0; i < prev.size(); i += 2) {
+        if (i + 1 < prev.size()) {
+          cur.push_back(new Node(prev[i], prev[i + 1]));
+        } else {
+          cur.push_back(prev[i]);
+        }
+      }
+      prev = cur;
+    }
+    return prev[0];
   }
 };
 int main() {
@@ -84,62 +121,55 @@ int main() {
   // and we need to keep the queries in order
   // and our segtree just needs the sums now, making queries faster
   // so we get O(NlgN + Q lgQ lgMEX + Q lgMEX lgN)
+  // if we instead used a persistent segtree
+  // we could still have that time complexity by having the persistent
+  // segtree be on the sorted numbers, and the roots be the root
+  // after inserting the first i numbers
+  // because then the amount of numbers <= X is just sum(...upper bound of X)
+  // and we can get that sum in lgN time, and get the upper bound of X in lgN
+  // time and we would increase our mex lgMEX times
   ios_base::sync_with_stdio(false);
   cin.tie(nullptr);
   cout.tie(nullptr);
   int n, q;
   cin >> n >> q;
-  vector<pair<ll, int>> nums(n + 1);
-  Segtree s(n + 1);
+  vector<ll> orig(n);
+  vector<pair<ll, int>> nums(n);
+  vector<int> toSortedIdx(n);
   for (int i = 0; i < n; ++i) {
     ll num;
     cin >> num;
     nums[i] = {num, i};
+    orig[i] = num;
   }
-  nums[n] = {numeric_limits<ll>::max(), n};
   sort(nums.begin(), nums.end());
-  // want to be able to access the thing with the minimum mex
-  priority_queue<tuple<ll, int, int, int>, vector<tuple<ll, int, int, int>>,
-                 greater<>>
-      queries;
+  for (int sIdx = 0; sIdx < n; ++sIdx) {
+    toSortedIdx[nums[sIdx].second] = sIdx;
+  }
+  // roots[i] = root after adding first i elements
+  PersistentSegtree s;
+  vector<PersistentSegtree::Node *> roots(n + 1);
+  roots[0] = s.build(orig);
+  for (int i = 0; i < n; ++i) {
+    roots[i + 1] = roots[i]->update(toSortedIdx[i], orig[i]);
+  }
+  // then now process queries
   for (int i = 0; i < q; ++i) {
     int l, r;
     cin >> l >> r;
-    queries.push({0, --l, --r, i});
-  }
-  // handle offline
-  vector<ll> res(q);
-  size_t l = 0;
-  while (l < nums.size()) {
-    // go to end
-    ll num = nums[l].first;
-    size_t r = l + 1;
-    while (r < nums.size() && nums[r].first == nums[l].first) {
-      r++;
+    PersistentSegtree::Node *lNode = roots[--l], *rNode = roots[r];
+    // then the sums of the interval are encoded as difference in sums between
+    // rNode and lNode
+    ll mex = 0;
+    int idx =
+        upper_bound(nums.begin(), nums.end(), pair{mex + 1, n}) - nums.begin();
+    ll reachable = rNode->query(idx) - lNode->query(idx);
+    while (reachable != mex) {
+      mex = reachable;
+      idx = upper_bound(nums.begin(), nums.end(), pair{mex + 1, n}) -
+            nums.begin();
+      reachable = rNode->query(idx) - lNode->query(idx);
     }
-
-    // some things might not be able to use this
-    while (!queries.empty() && get<0>(queries.top()) + 1 < num) {
-      auto [prevMex, l, r, resIdx] = queries.top();
-      queries.pop();
-
-      ll curMex = s.query(l, r);
-      if (curMex + 1 < num) {
-        // we are finished
-        res[resIdx] = curMex + 1;
-      } else {
-        // still alive
-        queries.push({curMex, l, r, resIdx});
-      }
-    }
-
-    // enable new things
-    while (l < r) {
-      s.inc(nums[l++].second, num);
-    }
-  }
-  // then output
-  for (ll num : res) {
-    cout << num << '\n';
+    cout << mex + 1 << '\n';
   }
 }
