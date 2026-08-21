@@ -25,53 +25,61 @@ class InnerSegtree {
     // this is the maximum value in this segment
     ll val;
   };
-  vector<vector<InnerInfo>> levels;
+  vector<InnerInfo> levels;
+  vector<pair<size_t, size_t>> levelInfo; // {size, start}
   size_t n;
 
 public:
   InnerSegtree(vector<NodeInfo> &nodes) : n(nodes.size()) {
-    vector<InnerInfo> firstLevel;
     // the nodes should already be sorted by finish time
     int prevFinishTime = -1;
     for (NodeInfo &info : nodes) {
       assert(info.endTime > prevFinishTime);
       prevFinishTime = info.endTime;
-      firstLevel.push_back({info.endTime, info.endTime, info.value});
+      levels.push_back({info.endTime, info.endTime, info.value});
     }
-    levels.push_back(firstLevel);
-    while (levels.back().size() > 1) {
-      auto &b = levels.back();
-      vector<InnerInfo> nextLevel;
-      for (size_t i = 0; i < b.size(); i += 2) {
-        if (i + 1 < b.size()) {
-          nextLevel.push_back(
-              {b[i].mi, b[i + 1].ma, max(b[i].val, b[i + 1].val)});
+    levelInfo.push_back({n, 0});
+    while (levelInfo.back().first > 1) {
+      auto [size, start] = levelInfo.back();
+      size_t ops = 0;
+      size_t myStart = levels.size();
+      for (size_t i = 0; i < size; i += 2) {
+        if (i + 1 < size) {
+          levels.push_back(
+              {levels[start + i].mi, levels[start + i + 1].ma,
+               max(levels[start + i].val, levels[start + i + 1].val)});
         } else {
-          nextLevel.push_back(b[i]);
+          levels.push_back(levels[start + i]);
         }
+        ops++;
       }
-      levels.push_back(nextLevel);
+      levelInfo.push_back({ops, myStart});
     }
   }
   // point update
   void update(size_t idx, ll newValue) {
-    levels[0][idx].val = newValue;
+    levels[idx].val = newValue;
     idx /= 2;
-    for (size_t level = 1; level < levels.size(); ++level, idx /= 2) {
-      if (idx * 2 + 1 < levels[level - 1].size()) {
-        levels[level][idx].val = max(levels[level - 1][idx * 2].val,
-                                     levels[level - 1][idx * 2 + 1].val);
+    size_t prevStart = 0;
+    size_t curStart;
+    for (size_t level = 1; level < levelInfo.size();
+         prevStart = curStart, ++level, idx /= 2) {
+      curStart = levelInfo[level].second;
+
+      if (idx * 2 + 1 < levelInfo[level - 1].first) {
+        levels[curStart + idx].val = max(levels[prevStart + idx * 2].val,
+                                         levels[prevStart + idx * 2 + 1].val);
       } else {
-        levels[level][idx] = levels[level - 1][idx * 2];
+        levels[curStart + idx] = levels[prevStart + idx * 2];
       }
     }
   }
   // range max
   ll maxHelper(int finishTimeGe, size_t level, size_t levelIdx) {
-    if (levelIdx >= levels[level].size()) {
+    if (levelIdx >= levelInfo[level].first) {
       return 0;
     }
-    InnerInfo info = levels[level][levelIdx];
+    InnerInfo info = levels[levelInfo[level].second + levelIdx];
     if (info.mi >= finishTimeGe) {
       // just use this
       return info.val;
@@ -83,7 +91,7 @@ public:
     }
   }
   ll rangeMax(int finishTimeGe) {
-    return maxHelper(finishTimeGe, levels.size() - 1, 0);
+    return maxHelper(finishTimeGe, levelInfo.size() - 1, 0);
   }
 };
 // outer segtree, responsible for merging
@@ -97,7 +105,8 @@ class OuterSegtree {
     // they ended up at
     map<NodeInfo, size_t> toIdx;
   };
-  vector<vector<Info>> levels;
+  vector<Info> levels;
+  vector<pair<size_t, size_t>> levelInfo; // {size, start}
   vector<int> startTimes;
   size_t n;
 
@@ -111,21 +120,22 @@ public:
       const NodeInfo &info = nodes[i];
       startTimes.push_back(info.startTime);
       nodesByChunk[i].push_back(info);
-      firstLevel.push_back({info.startTime,
-                            info.startTime,
-                            InnerSegtree(nodesByChunk[i]),
-                            {{info, 0}}});
+      levels.push_back({info.startTime,
+                        info.startTime,
+                        InnerSegtree(nodesByChunk[i]),
+                        {{info, 0}}});
     }
-    levels.push_back(firstLevel);
+    levelInfo.push_back({n, 0});
     const auto comp = [](const NodeInfo &a, const NodeInfo &b) {
       return a.endTime < b.endTime;
     };
-    while (levels.back().size() > 1) {
-      auto &b = levels.back();
+    while (levelInfo.back().first > 1) {
+      auto [size, start] = levelInfo.back();
       vector<vector<NodeInfo>> nextNodesByChunk;
-      vector<Info> nextLevel;
-      for (size_t i = 0; i < b.size(); i += 2) {
-        if (i + 1 < b.size()) {
+      size_t myStart = levels.size();
+      size_t ops = 0;
+      for (size_t i = 0; i < size; i += 2) {
+        if (i + 1 < size) {
           // need to merge two things to have them
           // sorted by end time
           auto &chunk1 = nodesByChunk[i];
@@ -137,38 +147,37 @@ public:
           for (size_t innerIdx = 0; innerIdx < merged.size(); ++innerIdx) {
             toIdx[merged[innerIdx]] = innerIdx;
           }
-          nextLevel.push_back(
-              {b[i].mi, b[i + 1].ma, InnerSegtree(merged), toIdx});
+          levels.push_back({levels[start + i].mi, levels[start + i + 1].ma,
+                            InnerSegtree(merged), toIdx});
           nextNodesByChunk.push_back(merged);
         } else {
-          nextLevel.push_back(b[i]);
+          levels.push_back(levels[start + i]);
           nextNodesByChunk.push_back(nodesByChunk[i]);
         }
+        ops++;
       }
       nodesByChunk = std::move(nextNodesByChunk);
-      levels.push_back(nextLevel);
+      levelInfo.push_back({ops, myStart});
     }
   }
   void update(const NodeInfo &info) {
     // assumes info is populated with the new value
     auto it = lower_bound(startTimes.begin(), startTimes.end(), info.startTime);
     assert(it != startTimes.end() && *it == info.startTime);
-    int idx = it - startTimes.begin();
+    size_t idx = it - startTimes.begin();
     // update up from there
-    for (size_t level = 0; level < levels.size(); ++level, idx /= 2) {
-      assert(idx < levels[level].size());
-      assert(levels[level][idx].toIdx.find(info) !=
-             levels[level][idx].toIdx.end());
-      levels[level][idx].stree.update(levels[level][idx].toIdx[info],
-                                      info.value);
+    for (size_t level = 0; level < levelInfo.size(); ++level, idx /= 2) {
+      size_t start = levelInfo[level].second;
+      levels[start + idx].stree.update(levels[start + idx].toIdx[info],
+                                       info.value);
     }
   }
   ll queryHelper(const NodeInfo &child, const NodeInfo &ancestor, size_t level,
                  size_t levelIdx) {
-    if (levelIdx >= levels[level].size()) {
+    if (levelIdx >= levelInfo[level].first) {
       return 0;
     }
-    auto &info = levels[level][levelIdx];
+    auto &info = levels[levelInfo[level].second + levelIdx];
     if (ancestor.startTime <= info.mi && info.ma <= child.startTime) {
       return info.stree.rangeMax(child.endTime);
     } else if (child.startTime < info.mi || info.ma < ancestor.startTime) {
@@ -181,7 +190,7 @@ public:
   ll query(const NodeInfo &child, const NodeInfo &ancestor) {
     assert(ancestor.startTime <= child.startTime &&
            child.endTime <= ancestor.endTime);
-    return queryHelper(child, ancestor, levels.size() - 1, 0);
+    return queryHelper(child, ancestor, levelInfo.size() - 1, 0);
   }
 };
 
