@@ -22,8 +22,6 @@ ll comb(ll n, ll k) {
   return numerator * modinv(denominator) % C;
 }
 int main() {
-  // this is multinomial coefficient
-  // ie Pr(n, r1, r2, ..., rk)
   ll n, m;
   cin >> n >> m;
   // m bins, n items
